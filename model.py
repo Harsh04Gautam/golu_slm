@@ -17,13 +17,13 @@ class Golu(nn.Module):
         self.token_embedding = nn.Embedding(token.vocab, cfg.num_embed)
         self.lang_mode_head = nn.Linear(cfg.num_embed, token.vocab)
         self.blocks = nn.Sequential(
-            *[nn.Sequential(*[Block(cfg.stride, 1), Block(cfg.stride * 8, cfg.stride * 8//2), Block(cfg.stride, 1)]) for i in range(cfg.num_layer)])
+            *[nn.Sequential(*[Block(cfg.stride, 1), Block(cfg.stride * 16, 1)]) for i in range(cfg.num_layer)])
         self.layer_norm = nn.LayerNorm(cfg.num_embed)
 
     def forward(self, x, y=None):
         _, T = x.shape
         x = self.token_embedding(x)
-        x = self.blocks(x)
+        x = x + self.blocks(x)
         x = self.layer_norm(x)
         logits = self.lang_mode_head(x)
         if y is None:
@@ -67,9 +67,9 @@ class MultiHeadPatchAttention(nn.Module):
         super().__init__()
         self.stride = stride
         self.step = step
-        self.qkv = nn.Linear(cfg.num_embed, 3*cfg.num_embed, bias=False)
+        self.qkv = nn.Linear(cfg.num_embed, 3*cfg.head, bias=False)
         self.add_rotation = Rotation()
-        self.proj = nn.Linear(cfg.num_embed, cfg.num_embed)
+        self.proj = nn.Linear(cfg.head, cfg.num_embed)
         self.dropout = nn.Dropout(cfg.dropout)
         self.register_buffer('mask', torch.tril(
             torch.ones((stride, stride))))
@@ -79,7 +79,7 @@ class MultiHeadPatchAttention(nn.Module):
     def forward(self, x: torch.tensor):
         S = self.stride
         B, T, C = x.shape
-        H = C//cfg.num_head
+        H = cfg.head//cfg.num_head
 
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q = self.add_rotation(q.view(B, T, cfg.num_head, H).transpose(1, 2))
@@ -132,7 +132,7 @@ class MultiHeadPatchAttention(nn.Module):
 class Rotation(nn.Module):
     def __init__(self, base=10000):
         super().__init__()
-        head = cfg.num_embed//cfg.num_head
+        head = cfg.head//cfg.num_head
         inv_freq = 1.0 / base ** (torch.arange(0, head, 2) / head)
         self.register_buffer('inf_freq', inv_freq)
         freq = torch.outer(torch.arange(cfg.block).float(), inv_freq)
@@ -151,9 +151,9 @@ class FeedForward(nn.Module):
     def __init__(self):
         super().__init__()
         self.feed_forward = nn.Sequential(
-            nn.Linear(cfg.num_embed, 4 * cfg.num_embed),
+            nn.Linear(cfg.num_embed, cfg.num_embed * 4),
             nn.GELU(),
-            nn.Linear(4 * cfg.num_embed, cfg.num_embed))
+            nn.Linear(cfg.num_embed * 4, cfg.num_embed))
 
     def forward(self, x):
         return self.feed_forward(x)

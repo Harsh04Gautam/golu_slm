@@ -9,9 +9,10 @@ class Config:
 
     # model config
     batch = 4
-    num_head = 64
-    num_embed = 8 * num_head
-    block = 1024
+    num_head = 16
+    num_embed = 512
+    head = 8 * num_head
+    block = 1024 * 2
     stride = 4
     num_layer = 4
     dropout = 0.2
