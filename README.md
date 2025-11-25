@@ -38,7 +38,7 @@ Alongside architectural innovation, the project includes extensive **low-level p
 A major bottleneck in SSMs is sequential recurrence.
 To overcome this:
 
-* Implemented a **custom Triton (or CUDA) kernel** for the **parallel scan (associative scan)** algorithm.
+* Implemented a **CUDA kernel** for the **parallel scan (associative scan)** algorithm.
 * Converts recurrence from sequential → parallel, maximizing GPU throughput.
 * Significantly accelerates both training and inference for SSM layers.
 
