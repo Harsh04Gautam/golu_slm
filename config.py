@@ -5,8 +5,8 @@ class Config:
     max_tokens = 500
 
     # model config
-    batch = 16
-    block = 512
+    batch = 4
+    block = 1024
     num_embed = 512
     head = num_embed
     num_head = 8
@@ -14,6 +14,7 @@ class Config:
     num_layer = 8
     dropout = 0.0
     learning_rate = 8e-4
+    prediction = 4
 
     def print_config(self):
         for name, value in self.__class__.__dict__.items():

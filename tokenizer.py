@@ -10,7 +10,7 @@ cfg = Config()
 
 class ByteLevelTokenizer(IterableDataset):
     def __init__(self):
-        self.vocab = 256 + 3
+        self.vocab = 256 + 4
         self.prompt = self.vocab - 3
         self.text = self.vocab - 2
         self.end = self.vocab - 1
@@ -54,6 +54,22 @@ class ByteLevelTokenizer(IterableDataset):
     #         data = data["conversation"]
     #         tokens = [self.text] + self.encode("<USER>") + self.encode(data[0]['content']) + self.encode(
     #             "<ASSISTANT>") + self.encode(data[1]['content']) + [self.end]
+    #         for i in range(0, len(tokens) - cfg.block, cfg.block):
+    #             chunk = tokens[i: i + cfg.block + 1]
+    #
+    #             if len(chunk) < cfg.block + 1:
+    #                 continue
+    #
+    #             x = torch.tensor(chunk[:-1])
+    #             y = torch.tensor(chunk[1:])
+    #             yield x, y
+
+    # def __iter__(self):
+    #     fw = load_dataset("HuggingFaceFW/fineweb-edu",
+    #                       name="sample-10BT", split="train", streaming=True).shuffle()
+    #     for data in fw:
+    #         self.row += 1
+    #         tokens = [self.text] + self.encode(data['text']) + [self.end]
     #         for i in range(0, len(tokens) - cfg.block, cfg.block):
     #             chunk = tokens[i: i + cfg.block + 1]
     #

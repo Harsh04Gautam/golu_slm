@@ -15,9 +15,11 @@ class Golu(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding = nn.Embedding(token.vocab, cfg.num_embed)
-        self.lang_mode_head = nn.Linear(cfg.num_embed, token.vocab)
+        self.lang_mode_head = nn.Linear(
+            cfg.num_embed, token.vocab * cfg.prediction)
         self.blocks = nn.Sequential(
-            *[nn.Sequential(*[Block(min(cfg.kernel * (2**i), 128), 1)]) for i in range(cfg.num_layer)])
+            *[nn.Sequential(*[Block(min(cfg.kernel * (2**i), cfg.block), 1)]) for i in range(cfg.num_layer)])
+        self.sa_block = Block(cfg.prediction, 1, True)
         self.layer_norm = nn.LayerNorm(cfg.num_embed)
 
     def forward(self, x, y=None):
@@ -26,10 +28,17 @@ class Golu(nn.Module):
         x = x + self.blocks(x)
         x = self.layer_norm(x)
         logits = self.lang_mode_head(x)
-        if y is None:
-            return logits, None
         B, T, C = logits.shape
-        loss = F.cross_entropy(logits.view(B*T, C), y.view(B*T))
+        logits = logits.view(B, T, cfg.prediction, token.vocab)
+        logits = self.sa_block(logits)
+        if y is None:
+            return logits[:, :, 0, :], None
+        logits = logits.view(B, T * cfg.prediction, token.vocab)
+        y = y.unfold(1, cfg.prediction, 1)
+        _, T, _ = y.shape
+        logits = logits[:, :T*cfg.prediction]
+        loss = F.cross_entropy(logits.reshape(
+            B*T*cfg.prediction, token.vocab), y.reshape(B*T*cfg.prediction))
         return logits, loss
 
     def print_model_info(self):
@@ -54,14 +63,15 @@ class Golu(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, kernel, step=None):
+    def __init__(self, kernel, step=None, self_attention=False):
         super().__init__()
         step = kernel - 2 if step is None else step
+        ln_size = cfg.num_embed if not self_attention else token.vocab
         self.layer_norm = nn.ModuleList(
-            [nn.LayerNorm(cfg.num_embed) for _ in range(2)])
+            [nn.LayerNorm(ln_size) for _ in range(2)])
         self.attention = MultiHeadPatchAttention(
-            kernel, step)
-        self.feed_forward = FeedForward()
+            kernel, step, self_attention)
+        self.feed_forward = FeedForward(self_attention)
         self.dropout = nn.ModuleList(
             [nn.Dropout(cfg.dropout) for _ in range(2)])
 
@@ -72,13 +82,15 @@ class Block(nn.Module):
 
 
 class MultiHeadPatchAttention(nn.Module):
-    def __init__(self, kernel, step):
+    def __init__(self, kernel, step, self_attention=False):
         super().__init__()
+        self.self_attention = self_attention
+        embed = cfg.num_embed if not self_attention else token.vocab
         self.kernel = kernel
         self.step = step
-        self.qkv = nn.Linear(cfg.num_embed, 3*cfg.head, bias=False)
+        self.qkv = nn.Linear(embed, 3*cfg.head, bias=False)
         self.add_rotation = Rotation()
-        # self.proj = nn.Linear(cfg.head, cfg.num_embed)
+        self.proj = nn.Linear(cfg.num_embed, embed)
         self.dropout = nn.Dropout(cfg.dropout)
         self.register_buffer('mask', torch.tril(
             torch.ones((kernel, kernel))))
@@ -87,6 +99,21 @@ class MultiHeadPatchAttention(nn.Module):
         self.indices = None
 
     def forward(self, x: torch.tensor):
+        if self.self_attention:
+            B, T, P, C = x.shape
+            H = cfg.head//cfg.num_head
+
+            q, k, v = self.qkv(x).chunk(3, dim=-1)
+            q = self.add_rotation(
+                q.view(B, T, P, cfg.num_head, H).transpose(2, 3))
+            k = self.add_rotation(
+                k.view(B, T, P, cfg.num_head, H).transpose(2, 3))
+            v = v.view(B, T, P, cfg.num_head, H).transpose(2, 3)
+            x = self._self_attention(q, k, v)
+            x = x.transpose(2, 3).reshape(B, T, P, cfg.num_head * H)
+            x = self.proj(x)
+            return x
+
         S = self.kernel
         B, T, C = x.shape
         H = cfg.head//cfg.num_head
@@ -108,20 +135,18 @@ class MultiHeadPatchAttention(nn.Module):
 
             x = torch.cat((x, x_sliding), dim=-2)
 
-        # look_back = (S * cfg.num_layer)//4
-        # n = (T-look_back)//look_back
-        # if T > look_back:
-        #     if self.indices is None or T > len(self.indices):
-        #         self.indices = torch.arange(look_back, T, look_back)
-        #     q = q[:, :, self.indices[:n]].unsqueeze(-2)
-        #     k = k[:, :, :look_back*n].view(B, cfg.num_head, n, look_back, H)
-        #     v = v[:, :, :look_back*n].view(B, cfg.num_head, n, look_back, H)
-        #     x[:, :, self.indices[:n]] = self._attention(q, k, v).squeeze(-2)
-
         x = x.transpose(1, 2).reshape(B, T, cfg.num_head * H)
-        # x = self.proj(x)
 
         return x
+
+    def _self_attention(self, q, k, v, mask=None):
+        wei = q @ k.transpose(-2, -1) * k.shape[-1]**-0.5
+        if mask is not None:
+            wei = wei.masked_fill(
+                mask[:wei.shape[-2], :wei.shape[-1]] == 0, float('-inf'))
+        wei = wei.softmax(-1)
+        wei = self.dropout(wei)
+        return wei @ v
 
     def _attention(self, q, k, v, mask=None):
         wei = q @ k.transpose(-2, -1) * k.shape[-1]**-0.5
@@ -175,12 +200,13 @@ class Rotation(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self):
+    def __init__(self, self_attention=False):
         super().__init__()
+        embed = cfg.num_embed if not self_attention else token.vocab
         self.feed_forward = nn.Sequential(
-            nn.Linear(cfg.num_embed, cfg.num_embed * 4),
+            nn.Linear(embed, embed * 4),
             nn.GELU(),
-            nn.Linear(cfg.num_embed * 4, cfg.num_embed))
+            nn.Linear(embed * 4, embed))
 
     def forward(self, x):
         return self.feed_forward(x)
