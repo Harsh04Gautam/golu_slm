@@ -70,3 +70,15 @@ This project is designed as a demonstration of:
 * Hybrid LLM architectural design
 * GPU-level performance engineering
 * State Space Models and efficient attention
+
+    # def get_batch(self, split, block=cfg.block):
+    #     encoding = self.train_split if split == "train" else self.val_split
+    #
+    #     indices = torch.randint(
+    #         0, len(encoding) - block, (cfg.batch,))
+    #     input = torch.tensor([encoding[i:i+block]
+    #                          for i in indices], dtype=torch.long)
+    #     output = torch.tensor(
+    #         [encoding[i+1:i+1+block] for i in indices],  dtype=torch.long)
+    #
+    #     return input, output

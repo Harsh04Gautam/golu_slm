@@ -1,19 +1,33 @@
 class Config:
     # trian config
-    total_iteration = 3001
-    eval_iteration = 200
-    eval_interval = 500
-    generate_interval = 3000
-    max_tokens = 1000
-    save_model = False
+    epochs = 5
+    save_model = True
+    max_tokens = 500
 
     # model config
-    batch = 4
-    num_head = 16
+    batch = 16
+    block = 512
     num_embed = 512
-    head = 8 * num_head
-    block = 1024 * 2
-    stride = 4
-    num_layer = 4
-    dropout = 0.2
-    learning_rate = 1e-3
+    head = num_embed
+    num_head = 8
+    kernel = 4
+    num_layer = 8
+    dropout = 0.0
+    learning_rate = 8e-4
+
+    def print_config(self):
+        for name, value in self.__class__.__dict__.items():
+            if name in {
+                "epochs",
+                "batch",
+                "block",
+                "num_head",
+                "num_embed",
+                "head",
+                "kernel",
+                "num_layer",
+                "dropout",
+                "learning_rate"
+            }:
+                print(f"{name:<20}: \033[1;92m{value}\033[0m")
+        print("\n")
